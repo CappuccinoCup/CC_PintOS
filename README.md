@@ -36,3 +36,12 @@
 16. 输入 `pintos run alarm-multiple` 尝试运行
 
 ### Project Threads
+> 可供参考的资料：
+>
+> [Pintos Projects: Table of Contents (stanford.edu)](http://www.scs.stanford.edu/10wi-cs140/pintos/pintos.html)
+>
+> [如何优雅地完成PintOS（Project1、2） - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/343328700)
+>
+> [GitHub - CCXXXI/pintos](https://github.com/CCXXXI/pintos)
+>
+> [pintos thread_xwyzsn的博客-CSDN博客](https://blog.csdn.net/xwyzsn/article/details/107396398)
