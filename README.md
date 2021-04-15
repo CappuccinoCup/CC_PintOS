@@ -27,10 +27,12 @@
 
 12. 打开 `/utils/pintos` 修改621行 `qemu` 为 `qemu-system-x86_64`
 
-13. 打开 `/utils/Pintos.pm` 修改362行 `loader.bin`为完整路径的 `loader.bin` ，笔者填写的是 `/home/cappuccinocup/codes/pintos/src/threads/build/loader.bin`
+13. 打开 `/utils/Pintos.pm` 修改第362行 `loader.bin`为完整路径的 `loader.bin` ，笔者填写的是 `/home/cappuccinocup/codes/pintos/src/threads/build/loader.bin`
 
 14. 打开 `~/.bashrc` 并添加 `export PATH=/home/.../pintos/src/utils:$PATH` 到最后一行
 
 15. 输入 `source ~/.bashrc` 并重新打开终端
 
 16. 输入 `pintos run alarm-multiple` 尝试运行
+
+### Project Threads
