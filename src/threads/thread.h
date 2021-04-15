@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "fixed_point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,17 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Thread nice value. */
+#define NICE_MIN -20   /* Lowest nice. */
+#define NICE_DEFAULT 0 /* Default nice. */
+#define NICE_MAX 20    /* Highest nice. */
+
+/* Thread recent cpu. */
+#define RECENT_CPU_DEFAULT i_to_fp(0) /* Default recent_cpu. */
+
+/* Load average. */
+#define LOAD_AVG_DEFAULT i_to_fp(0); /* Default load_avg. */
 
 /* A kernel thread or user process.
 
@@ -88,10 +100,21 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int base_priority;                  /* Priority without donation. */
+    int nice;                           /* How nice the thread should be to other threads. */
     struct list_elem allelem;           /* List element for all threads list. */
+    unsigned fifo;                      /* Used to make heap fifo. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    struct list donor;     /* Locks that donate the thread. */
+    struct lock *donee;    /* Locks that donated by the thread. */
+
+    /* Shared between thread.c and timer.c. */
+    fp_t recent_cpu;
+
+    /* Owned by timer.c. */
+    int64_t wake_up_time; /* Time to stop sleeping. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -106,6 +129,9 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+/* A moving average of the number of threads ready to run. */
+fp_t load_avg;
 
 void thread_init (void);
 void thread_start (void);
@@ -132,10 +158,15 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_update_priority (struct thread *);
+list_less_func thread_elem_priority_cmp;
 
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void thread_calc_recent_cpu (void);
+
+struct thread *thread_pop_highest_priority (struct list *list);
 
 #endif /* threads/thread.h */
