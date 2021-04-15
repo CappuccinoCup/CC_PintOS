@@ -23,9 +23,9 @@
 
 10. 打开 `/utils/pintos` 修改第103行 `bochs` 为 `qemu`
 
-11. 打开 `/utils/pintos` 修改〜257行 `kernel.bin`为完整路径的 `kernel.bin` ，笔者填写的是 `/home/cappuccinocup/codes/pintos/src/threads/build/kernel.bin`
+11. 打开 `/utils/pintos` 修改第257行 `kernel.bin`为完整路径的 `kernel.bin` ，笔者填写的是 `/home/cappuccinocup/codes/pintos/src/threads/build/kernel.bin`
 
-12. 打开 `/utils/pintos` 修改〜621行 `qemu` 为 `qemu-system-x86_64`
+12. 打开 `/utils/pintos` 修改621行 `qemu` 为 `qemu-system-x86_64`
 
 13. 打开 `/utils/Pintos.pm` 修改362行 `loader.bin`为完整路径的 `loader.bin` ，笔者填写的是 `/home/cappuccinocup/codes/pintos/src/threads/build/loader.bin`
 
