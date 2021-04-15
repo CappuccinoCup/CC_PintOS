@@ -282,8 +282,11 @@ lock_release (struct lock *lock)
 
   /* LOCK do not donate to CUR now. */
   lock->holder = NULL;
-  list_remove(&lock->elem);
-  thread_update_priority(cur);
+  if (!thread_mlfqs) 
+    {
+      list_remove(&lock->elem);
+      thread_update_priority(cur);
+    }
   sema_up (&lock->semaphore);
 }
 
