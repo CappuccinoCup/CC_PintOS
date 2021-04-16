@@ -45,3 +45,5 @@
 > [GitHub - CCXXXI/pintos](https://github.com/CCXXXI/pintos)
 >
 > [pintos thread_xwyzsn的博客-CSDN博客](https://blog.csdn.net/xwyzsn/article/details/107396398)
+
+- 压缩包使用方法：临时解压到一个文件夹中，然后将其中的同名文件替换项目中的文件。如此一来运行 `make check` 时就不需要再次编译运行了
