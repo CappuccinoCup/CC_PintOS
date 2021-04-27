@@ -74,11 +74,124 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
+
 static int thread_get_donor_priority(struct thread *);
 static thread_action_func thread_calc_recent_cpu_single;
 static void thread_calc_load_avg(void);
-static heap_less_func thread_priority_cmp;
+static heap_less_than thread_priority_cmp;
 static void thread_calc_priority(struct thread *);
+
+/* Get the max priority of t->donor. */
+static int thread_get_donor_priority(struct thread *t)
+{
+    if (list_empty(&t->donor))
+        return PRI_MIN;
+    return list_entry(list_max(&t->donor, lock_elem_priority_cmp, NULL), struct lock, elem)->priority;
+}
+
+/* recent_cpu = (2 * load_avg) / (2 * load_avg + 1) * recent_cpu + nice */
+static void
+thread_calc_recent_cpu_single (struct thread *t, void *aux UNUSED) 
+{
+    ASSERT(is_thread(t));
+
+    if (t == idle_thread)
+        return;
+
+    fp_t k = fp_div_fp(fp_mul_i(load_avg, 2), fp_add_i(fp_mul_i(load_avg, 2), 1));
+    t->recent_cpu = fp_add_i(fp_mul_fp(k, t->recent_cpu), t->nice);
+
+    thread_calc_priority(t);
+}
+
+/* load_avg = (59 / 60) * load_avg + (1 / 60) * ready_threads */
+static void
+thread_calc_load_avg (void) 
+{
+    int ready_threads = ready_q.size + (thread_current() != idle_thread);
+    fp_t k1 = fp_div_fp(i_to_fp(59), i_to_fp(60));
+    fp_t k2 = fp_div_fp(i_to_fp(1), i_to_fp(60));
+    load_avg = fp_add_fp(fp_mul_fp(k1, load_avg), fp_mul_i(k2, ready_threads));
+}
+
+/* Compares the priority of two threads A and B.
+    Returns true if A is less than B, or
+    false if A is greater than or equal to B. */
+static bool thread_priority_cmp(void *a, void *b)
+{
+    struct thread *ta = (struct thread *)a;
+    struct thread *tb = (struct thread *)b;
+
+    ASSERT(ta->fifo != tb->fifo);
+
+    if (ta->priority == tb->priority)
+        return ta->fifo > tb->fifo;
+    return ta->priority < tb->priority;
+}
+
+/* priority = PRI_MAX - (recent_cpu / 4) - (nice * 2) */
+static void
+thread_calc_priority (struct thread *t) 
+{
+    ASSERT(thread_mlfqs);
+    ASSERT(is_thread(t));
+    if (t == idle_thread)
+        return;
+
+    t->priority = PRI_MAX - fp_to_i(fp_div_i(t->recent_cpu, 4)) - t->nice * 2;
+    if (t->priority > PRI_MAX)
+        t->priority = PRI_MAX;
+    if (t->priority < PRI_MIN)
+        t->priority = PRI_MIN;
+}
+
+/* Sets t->priority to max(base_priority, donor_priority). */
+void 
+thread_update_priority (struct thread *t)
+{
+    if (thread_mlfqs)
+        return;
+
+    ASSERT(is_thread(t));
+
+    int old_priority = t->priority;
+
+    t->priority = thread_get_donor_priority(t);
+    if (t->priority < t->base_priority)
+        t->priority = t->base_priority;
+
+    if (t->priority != old_priority && t->donee != NULL)
+        lock_update_priority(t->donee);
+}
+
+/* Compares the priority of two thread elem A and B, without using
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool 
+thread_elem_priority_cmp (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+    return list_entry(a, struct thread, elem)->priority < list_entry(b, struct thread, elem)->priority;
+}
+
+/* Calc load_avg and recent_cpu for all threads. */
+void
+thread_calc_recent_cpu (void) 
+{
+    thread_calc_load_avg();
+    thread_foreach(thread_calc_recent_cpu_single, NULL);
+}
+
+/* Removes the highest-priority thread from LIST and returns it.
+   Undefined behavior if LIST is empty before removal. */
+struct thread *
+thread_pop_highest_priority (struct list *list)
+{
+    struct list_elem *tmp = list_max(list, thread_elem_priority_cmp, NULL);
+    list_remove(tmp);
+    return list_entry(tmp, struct thread, elem);
+}
+
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -381,32 +494,6 @@ thread_get_priority (void)
   return thread_current ()->priority;
 }
 
-/* Sets t->priority to max(base_priority, donor_priority). */
-void thread_update_priority(struct thread *t)
-{
-    if (thread_mlfqs)
-        return;
-
-    ASSERT(is_thread(t));
-
-    int old_priority = t->priority;
-
-    t->priority = thread_get_donor_priority(t);
-    if (t->priority < t->base_priority)
-        t->priority = t->base_priority;
-
-    if (t->priority != old_priority && t->donee != NULL)
-        lock_update_priority(t->donee);
-}
-
-/* Get the max priority of t->donor. */
-static int thread_get_donor_priority(struct thread *t)
-{
-    if (list_empty(&t->donor))
-        return PRI_MIN;
-    return list_entry(list_max(&t->donor, lock_elem_priority_cmp, NULL), struct lock, elem)->priority;
-}
-
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice) 
@@ -439,55 +526,6 @@ int
 thread_get_recent_cpu (void) 
 {
     return fp_to_i(fp_mul_i(thread_current()->recent_cpu, 100));
-}
-
-/* priority = PRI_MAX - (recent_cpu / 4) - (nice * 2) */
-static void
-thread_calc_priority (struct thread *t) 
-{
-    ASSERT(thread_mlfqs);
-    ASSERT(is_thread(t));
-    if (t == idle_thread)
-        return;
-
-    t->priority = PRI_MAX - fp_to_i(fp_div_i(t->recent_cpu, 4)) - t->nice * 2;
-    if (t->priority > PRI_MAX)
-        t->priority = PRI_MAX;
-    if (t->priority < PRI_MIN)
-        t->priority = PRI_MIN;
-}
-
-/* recent_cpu = (2 * load_avg) / (2 * load_avg + 1) * recent_cpu + nice */
-static void
-thread_calc_recent_cpu_single (struct thread *t, void *aux UNUSED) 
-{
-    ASSERT(is_thread(t));
-
-    if (t == idle_thread)
-        return;
-
-    fp_t k = fp_div_fp(fp_mul_i(load_avg, 2), fp_add_i(fp_mul_i(load_avg, 2), 1));
-    t->recent_cpu = fp_add_i(fp_mul_fp(k, t->recent_cpu), t->nice);
-
-    thread_calc_priority(t);
-}
-
-/* Calc load_avg and recent_cpu for all threads. */
-void
-thread_calc_recent_cpu (void) 
-{
-    thread_calc_load_avg();
-    thread_foreach(thread_calc_recent_cpu_single, NULL);
-}
-
-/* load_avg = (59 / 60) * load_avg + (1 / 60) * ready_threads */
-static void
-thread_calc_load_avg (void) 
-{
-    int ready_threads = ready_q.size + (thread_current() != idle_thread);
-    fp_t k1 = fp_div_fp(i_to_fp(59), i_to_fp(60));
-    fp_t k2 = fp_div_fp(i_to_fp(1), i_to_fp(60));
-    load_avg = fp_add_fp(fp_mul_fp(k1, load_avg), fp_mul_i(k2, ready_threads));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -615,45 +653,10 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (heap_empty (&ready_q))
+  if (heap_is_empty (&ready_q))
     return idle_thread;
   else
     return (struct thread *) (heap_pop (&ready_q));
-}
-
-/* Removes the highest-priority thread from LIST and returns it.
-   Undefined behavior if LIST is empty before removal. */
-struct thread *
-thread_pop_highest_priority(struct list *list)
-{
-    struct list_elem *tmp = list_max(list, thread_elem_priority_cmp, NULL);
-    list_remove(tmp);
-    return list_entry(tmp, struct thread, elem);
-}
-
-/* Compares the priority of two thread elem A and B, without using
-   auxiliary data AUX.  Returns true if A is less than B, or
-   false if A is greater than or equal to B. */
-bool thread_elem_priority_cmp(const struct list_elem *a,
-                              const struct list_elem *b,
-                              void *aux UNUSED)
-{
-    return list_entry(a, struct thread, elem)->priority < list_entry(b, struct thread, elem)->priority;
-}
-
-/* Compares the priority of two threads A and B.
-    Returns true if A is less than B, or
-    false if A is greater than or equal to B. */
-static bool thread_priority_cmp(void *a, void *b)
-{
-    struct thread *ta = (struct thread *)a;
-    struct thread *tb = (struct thread *)b;
-
-    ASSERT(ta->fifo != tb->fifo);
-
-    if (ta->priority == tb->priority)
-        return ta->fifo > tb->fifo;
-    return ta->priority < tb->priority;
 }
 
 /* Completes a thread switch by activating the new thread's page

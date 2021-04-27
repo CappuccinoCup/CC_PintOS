@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+
 #include "threads/heap.h"
 
 /* See [8254] for hardware details of the 8254 timer chip. */
@@ -25,8 +26,7 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
-/* Heap of processes in sleep state, that is, processes
-   that called timer_sleep() and not wake up. */
+/* sleep 队列，保存所有处于 sleep 状态的线程 */
 static struct heap sleep_q;
 
 static intr_handler_func timer_interrupt;
@@ -34,9 +34,38 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-static heap_less_func thread_wake_up_time_cmp;
+
+static heap_less_than thread_wake_up_time_less_than;
 static void sleep_check (int64_t now);
 static void mlfqs_check (void);
+
+/* 如果 a 的唤醒时间小于 b 返回 true ，否则返回 false */
+static bool
+thread_wake_up_time_less_than (void *a, void *b) 
+{
+  return ((struct thread *)a)->wake_up_time < ((struct thread *)b)->wake_up_time;
+}
+
+/* 检查 sleep 队列并根据唤醒时间进行唤醒操作，用于 timer_interrupt 中 */
+static void
+sleep_check (int64_t now) 
+{
+  while (!heap_is_empty(&sleep_q) && ((struct thread *)heap_top(&sleep_q))->wake_up_time <= now)
+    {
+      thread_unblock((struct thread *)heap_pop(&sleep_q));
+    }
+}
+
+/* 更新 recent_cpu 与 load_avg ，，用于 timer_interrupt 中 */
+static void
+mlfqs_check (void) 
+{
+  ASSERT (thread_mlfqs);
+
+  enum intr_level old_level = intr_disable ();
+  thread_calc_recent_cpu ();
+  intr_set_level (old_level);
+}
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -45,7 +74,9 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  heap_init (&sleep_q, thread_wake_up_time_cmp, false);
+
+  // 初始化 sleep 队列
+  heap_init (&sleep_q, thread_wake_up_time_less_than, false);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -99,30 +130,12 @@ void
 timer_sleep (int64_t ticks) 
 {
   struct thread *cur = thread_current();
+
   enum intr_level old_level = intr_disable();
   cur->wake_up_time = timer_ticks() + ticks;
   heap_push(&sleep_q, cur);
   thread_block();
   intr_set_level(old_level);
-}
-
-/* Compares the wake_up_time of two threads A and B.
-    Returns true if A is less than B, or
-    false if A is greater than or equal to B. */
-static bool
-thread_wake_up_time_cmp (void *a, void *b) 
-{
-  return ((struct thread *)a)->wake_up_time < ((struct thread *)b)->wake_up_time;
-}
-
-/* Check sleep_q. Wake up the sleeper if necessary. */
-static void
-sleep_check (int64_t now) 
-{
-  while (!heap_empty(&sleep_q) && ((struct thread *)heap_top(&sleep_q))->wake_up_time <= now)
-    {
-      thread_unblock((struct thread *)heap_pop(&sleep_q));
-    }
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -201,20 +214,10 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
   sleep_check (ticks);
   if (thread_mlfqs && ticks % TIMER_FREQ == 0)
     mlfqs_check ();
-}
-
-/* Updates recent_cpu and load_avg. */
-static void
-mlfqs_check (void) 
-{
-  ASSERT (thread_mlfqs);
-
-  enum intr_level old_level = intr_disable ();
-  thread_calc_recent_cpu ();
-  intr_set_level (old_level);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

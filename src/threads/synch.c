@@ -32,6 +32,99 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+
+static void lock_acquire_success (struct lock *lock);
+static void lock_acquire_fail (struct lock *lock);
+static void lock_update_priority_force (struct lock *lock, int priority);
+static int lock_get_donor_priority (struct lock *);
+static bool is_lock (struct lock *) UNUSED;
+
+/* Returns true if LOCK appears to point to a valid lock. */
+static bool
+is_lock (struct lock *lock) 
+{
+  return lock != NULL;
+}
+
+/* Subfunction of lock_acquire and lock_try_acquire. */
+static void
+lock_acquire_success (struct lock *lock) 
+{
+    struct thread *cur = thread_current();
+
+    /* CUR do not donate to LOCK now. */
+    /* LOCK do donate to CUR now. */
+    cur->donee = NULL;
+    lock->holder = cur;
+    list_push_back(&cur->donor, &lock->elem);
+
+    lock_update_priority(lock);
+    thread_update_priority(cur);
+}
+
+/* Subfunction of lock_acquire. */
+static void
+lock_acquire_fail (struct lock *lock) 
+{
+    struct thread *cur = thread_current();
+
+    /* CUR do donate to LOCK now. */
+    cur->donee = lock;
+    lock_update_priority_force(lock, cur->priority);
+}
+
+/* Sets lock->priority to max(lock->priority, priority). */
+static void
+lock_update_priority_force (struct lock *lock, int priority) 
+{
+    if (thread_mlfqs) 
+        return;
+
+    ASSERT(is_lock(lock));
+
+    if (lock->priority < priority)
+    {
+        lock->priority = priority;
+        thread_update_priority(lock->holder);
+    }
+}
+
+/* Get the max priority of lock->semaphore.waiters. */
+static int
+lock_get_donor_priority (struct lock *lock) 
+{
+    if (list_empty(&lock->semaphore.waiters))
+        return PRI_MIN;
+    return list_entry(list_max(&lock->semaphore.waiters, thread_elem_priority_cmp, NULL), struct thread, elem)->priority;
+}
+
+/* Compares the priority of two lock elem A and B, without using
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool
+lock_elem_priority_cmp (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+    return list_entry(a, struct lock, elem)->priority < list_entry(b, struct lock, elem)->priority;
+}
+
+/* Sets lock->priority to donor_priority. */
+void
+lock_update_priority (struct lock *lock) 
+{
+    if (thread_mlfqs)
+        return;
+
+    ASSERT(is_lock(lock));
+
+    int old_priority = lock->priority;
+
+    lock->priority = lock_get_donor_priority(lock);
+
+    if (lock->priority != old_priority)
+        thread_update_priority(lock->holder);
+}
+
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -158,19 +251,6 @@ sema_test_helper (void *sema_)
     }
 }
 
-static void lock_acquire_success (struct lock *lock);
-static void lock_acquire_fail (struct lock *lock);
-static void lock_update_priority_force (struct lock *lock, int priority);
-static int lock_get_donor_priority (struct lock *);
-static bool is_lock (struct lock *) UNUSED;
-
-/* Returns true if LOCK appears to point to a valid lock. */
-static bool
-is_lock (struct lock *lock) 
-{
-  return lock != NULL;
-}
-
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
    is, it is an error for the thread currently holding a lock to
@@ -240,33 +320,6 @@ lock_try_acquire (struct lock *lock)
   return success;
 }
 
-/* Subfunction of lock_acquire. */
-static void
-lock_acquire_fail (struct lock *lock) 
-{
-    struct thread *cur = thread_current();
-
-    /* CUR do donate to LOCK now. */
-    cur->donee = lock;
-    lock_update_priority_force(lock, cur->priority);
-}
-
-/* Subfunction of lock_acquire and lock_try_acquire. */
-static void
-lock_acquire_success (struct lock *lock) 
-{
-    struct thread *cur = thread_current();
-
-    /* CUR do not donate to LOCK now. */
-    /* LOCK do donate to CUR now. */
-    cur->donee = NULL;
-    lock->holder = cur;
-    list_push_back(&cur->donor, &lock->elem);
-
-    lock_update_priority(lock);
-    thread_update_priority(cur);
-}
-
 /* Releases LOCK, which must be owned by the current thread.
 
    An interrupt handler cannot acquire a lock, so it does not
@@ -299,59 +352,6 @@ lock_held_by_current_thread (const struct lock *lock)
   ASSERT (lock != NULL);
 
   return lock->holder == thread_current ();
-}
-
-/* Compares the priority of two lock elem A and B, without using
-   auxiliary data AUX.  Returns true if A is less than B, or
-   false if A is greater than or equal to B. */
-bool
-lock_elem_priority_cmp (const struct list_elem *a,
-                        const struct list_elem *b,
-                        void *aux UNUSED)
-{
-    return list_entry(a, struct lock, elem)->priority < list_entry(b, struct lock, elem)->priority;
-}
-
-/* Sets lock->priority to donor_priority. */
-void
-lock_update_priority (struct lock *lock) 
-{
-    if (thread_mlfqs)
-        return;
-
-    ASSERT(is_lock(lock));
-
-    int old_priority = lock->priority;
-
-    lock->priority = lock_get_donor_priority(lock);
-
-    if (lock->priority != old_priority)
-        thread_update_priority(lock->holder);
-}
-
-/* Sets lock->priority to max(lock->priority, priority). */
-static void
-lock_update_priority_force (struct lock *lock, int priority) 
-{
-    if (thread_mlfqs)
-        return;
-
-    ASSERT(is_lock(lock));
-
-    if (lock->priority < priority)
-    {
-        lock->priority = priority;
-        thread_update_priority(lock->holder);
-    }
-}
-
-/* Get the max priority of lock->semaphore.waiters. */
-static int
-lock_get_donor_priority (struct lock *lock) 
-{
-    if (list_empty(&lock->semaphore.waiters))
-        return PRI_MIN;
-    return list_entry(list_max(&lock->semaphore.waiters, thread_elem_priority_cmp, NULL), struct thread, elem)->priority;
 }
 
 /* Initializes condition variable COND.  A condition variable

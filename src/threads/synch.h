@@ -24,8 +24,8 @@ struct lock
     struct semaphore semaphore; /* Binary semaphore controlling access. */
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem; /* List element. */
-    int priority;          /* Priority donated to HOLDER. */
+    struct list_elem elem;      /* List element. */
+    int priority;               /* Priority donated to HOLDER. */
   };
 
 void lock_init (struct lock *);
@@ -33,6 +33,7 @@ void lock_acquire (struct lock *);
 bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
+
 list_less_func lock_elem_priority_cmp;
 void lock_update_priority (struct lock *);
 
